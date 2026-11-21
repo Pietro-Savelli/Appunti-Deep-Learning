@@ -4475,15 +4475,6 @@ Le due reti hanno obiettivi opposti:
 =\E_{\mathbf{x}\sim p_{\mathrm{data}}}\big[\log D_{\theta_D}(\mathbf{x})\big]
 +\E_{\mathbf{z}\sim p(\mathbf{z})}\big[\log\big(1-D_{\theta_D}(G_{\theta_G}(\mathbf{z}))\big)\big]
 \]
-\textit{NON SO SE TENERE QEUSTO ELENCO}
-\begin{itemize}
-  \item \textbf{Dati reali,} $\E_{\mathbf{x}\sim p_{\mathrm{data}}}[\log D(\mathbf{x})]$:
-        il discriminatore vuole $D(\mathbf{x})\to 1$, quindi $\log D(\mathbf{x})$
-        vicino a zero (il massimo possibile);
-  \item \textbf{Dati generati,} $\E_{\mathbf{z}}[\log(1-D(G(\mathbf{z})))]$:
-        il discriminatore vuole $D(G(\mathbf{z}))\to 0$, quindi
-        $1-D(G(\mathbf{z}))$ vicino a 1 e il logaritmo vicino a zero.
-\end{itemize}
 
 \subsubsection{Obiettivo del discriminatore}
 Massimizza $V$ rispetto a $\theta_D$:
@@ -4622,19 +4613,6 @@ fornito il segnale durante il training:
 \mathbf{z}\sim p(\mathbf{z}),\qquad \mathbf{x}_{\mathrm{fake}}=G(\mathbf{z}).
 \]
 
-\subsubsection{Esempi di output}
-Le slide mostrano campioni generati su TFD e CIFAR-10, accanto ai
-\emph{nearest neighbors} del training set: gli esempi del dataset più vicini ai
-campioni generati secondo una misura di similarità. Il confronto serve a vedere
-se le immagini generate sono nuove o troppo simili a esempi già presenti.
-
-\subsubsection{Esempi di output}
-Le slide mostrano campioni generati su MNIST, TFD e CIFAR-10, accanto ai
-\emph{nearest neighbors} del training set (ultima colonna, riquadrata in giallo):
-gli esempi del dataset più vicini ai campioni generati secondo una misura di
-similarità. Il confronto serve a vedere se le immagini generate sono nuove o
-troppo simili a esempi già presenti.
-
 %---------------------------------------------------------------------
 \subsection{Deep Convolutional GAN (DCGAN)}
 %---------------------------------------------------------------------
@@ -4646,27 +4624,19 @@ vicini e le feature gerarchiche.
 
 \textbf{Interpolazione nello spazio latente.} Dati due vettori latenti
 $\mathbf{z}_1$ e $\mathbf{z}_2$:
-\[
-\mathbf{z}(\alpha)=(1-\alpha)\mathbf{z}_1+\alpha\mathbf{z}_2,\qquad\alpha\in[0,1].
-\]
+
 Agli estremi si ottengono $\mathbf{z}_1$ e $\mathbf{z}_2$; per valori intermedi
 il generatore produce immagini intermedie. Se lo spazio latente è ben appreso,
-le caratteristiche visive cambiano in modo graduale.
-
-\textbf{Aritmetica nello spazio latente.} Una direzione $\Delta\mathbf{z}$ può
-corrispondere a una variazione semantica:
-\[
-\mathbf{z}_{\mathrm{nuovo}}=\mathbf{z}_{\mathrm{origine}}+\Delta\mathbf{z}.
-\]
-La modifica avviene nello spazio latente e il generatore la traduce in una
+le caratteristiche visive cambiano in modo graduale,
+la modifica avviene nello spazio latente e il generatore la traduce in una
 variazione dell'immagine.
 
 %---------------------------------------------------------------------
-\subsection{Evoluzione delle GAN}
+\subsection{Evoluzione delle GAN} 
 %---------------------------------------------------------------------
-
+\textbf{DA CHEIDERE MA PER ME SI PUO SALTARE FINO A PRO E CONTRO}
 Sono state proposte nel tempo diverse loss e architetture per migliorare la
-qualità dei campioni e la stabilità.
+qualità dei campioni e lar stabilità.
 
 \begin{itemize}
   \item \textbf{LSGAN} (Mao et al., 2017): sostituisce la loss logaritmica con
@@ -4806,6 +4776,293 @@ aggiornamenti. All'inizio $D(G(\mathbf{z}))\approx0$ e il gradiente del generato
 quasi sparisce, quindi si usa l'obiettivo non saturante
 $\max_G\E[\log D(G(\mathbf{z}))]$. Rispetto al VAE non c'è densità esplicita né
 ricostruzione, ma l'addestramento è meno stabile.
+\end{importante}
+
+\section{Rappresentazioni discrete e VQ-VAE}
+
+\subsection{Discretizzazione}
+
+La \textbf{discretizzazione} è il processo con cui un fenomeno continuo viene diviso in parti distinte. Le slide la 
+presentano come un processo cognitivo fondamentale, studiato da secoli in filosofia, scienza e matematica.
+
+\begin{itemize}
+  \item \textbf{Kant} (\emph{Critica della ragion pura}, 1781): la mente non riceve passivamente i dati sensoriali ma 
+  li struttura, applicando categorie dell'intelletto al flusso dell'esperienza. È una forma di discretizzazione concettuale.
+  \item \textbf{Cartesio} (\emph{La Géométrie}, 1637): il sistema di coordinate cartesiane divide lo spazio continuo 
+  in dimensioni misurabili, $x$ e $y$.
+\end{itemize}
+
+\textbf{Punto importante:} capire l'infinito richiede di ridurlo a parti finite e gestibili.
+
+\subsection{Perché rappresentazioni discrete}
+
+Molti domini sono per natura discreti, e modellarli con rappresentazioni continue può far perdere proprietà strutturali:
+\begin{itemize}
+  \item il \textbf{linguaggio} è una sequenza di simboli discreti (parole, subword, fonemi);
+  \item le \textbf{immagini} sono griglie discrete di pixel con valori di colore quantizzati;
+  \item \textbf{musica e parlato} sono spesso rappresentati in modo simbolico (note, fonemi).
+\end{itemize}
+
+Nei sistemi di AI le rappresentazioni discrete permettono:
+\begin{itemize}
+  \item \textbf{compressione efficiente}, perché i latenti discreti sono più facili da codificare in modo compatto;
+  \item \textbf{ragionamento simbolico};
+  \item \textbf{design modulare} (nelle slide l'esempio è il Mixture of Experts).
+\end{itemize}
+
+\subsection{Il problema: variabili discrete e gradient descent}
+
+Le reti si ottimizzano con il gradient descent, quindi serve poter propagare il gradiente. Le scelte discrete non sono 
+differenziabili, e la backpropagation standard non passa attraverso:
+\begin{itemize}
+  \item \texttt{argmax};
+  \item il campionamento da una distribuzione categorica.
+\end{itemize}
+
+Le slide danno un esempio in PyTorch: dato un \texttt{query} con \texttt{requires\_grad=True} e cinque chiavi, si calcolano i punteggi
+\[
+s_i = k_i^\top q, \qquad i = 1, \ldots, 5,
+\]
+si sceglie $i^\star = \argmax_i s_i$, si recupera \texttt{values}$[i^\star]$ e si calcola una loss su quel valore. 
+Chiamando \texttt{loss.backward()} si ottiene un errore:
+\begin{quote}
+\small\texttt{RuntimeError: element 0 of tensors does not require grad\\ and does not have a grad\_fn}
+\end{quote}
+
+\begin{osservazione}[Perché l'errore (non nelle slide)]
+\texttt{argmax} restituisce un indice intero, e \texttt{values} è un tensore costante. Il valore selezionato non ha 
+quindi nessun collegamento differenziabile con \texttt{query}: la loss non ha un \texttt{grad\_fn} e \texttt{backward()} non può partire.
+\end{osservazione}
+
+Le slide anticipano le soluzioni che vedremo:
+\begin{itemize}
+  \item i \textbf{VQ-VAE} usano gli \emph{straight-through estimator};
+  \item i \textbf{Pixel-RNN} usano un addestramento autoregressivo (teacher forcing, massimizzazione della likelihood);
+  \item i gradienti surrogati, come il \textbf{Gumbel-Softmax}.
+\end{itemize}
+Qui ci si ferma al VQ-VAE e al problema della prior (slide 1-33).
+
+\subsection{Richiamo: limiti del VAE}
+
+Nel VAE (sezione 25) l'encoder produce $q(z \mid x)$, si campiona $z \sim q(z \mid x)$ e il decoder $p(x \mid z)$ 
+ricostruisce $x$. Le slide ricordano due problemi.
+
+\textbf{Output sfocati e mode collapse.} I VAE tendono a generare output sfocati e poco realistici. Nel 
+\emph{mode collapse} il modello genera solo un sottoinsieme dei possibili output, cioè pochi ``modi'' 
+della distribuzione dei dati, ignorando la varietà del training set. Nella figura delle slide (CIFAR-10 e SVHN) 
+il caso del mode collapse è una GAN.
+
+\textbf{Posterior collapse.} Il posterior variazionale dell'encoder collassa rapidamente verso la prior nelle 
+prime fasi dell'addestramento. Quando succede:
+\begin{itemize}
+  \item le variabili latenti smettono di portare informazione utile sull'input e il decoder impara a ignorarle;
+  \item il collasso è spesso irreversibile: una volta che l'encoder converge alla prior non informativa, di rado si riprende senza interventi.
+\end{itemize}
+
+Le slide propongono due soluzioni.
+\begin{enumerate}
+  \item \textbf{$\beta$-VAE:} introduce un iperparametro $\beta$ che pesa la KL nella ELBO:
+  \[
+  \boxed{\E_{z \sim q(z \mid x)}\big[\log p(x \mid z)\big] - \beta\, \DKL\big[q(z \mid x) \,\|\, p(z)\big]}
+  \]
+  \item \textbf{VQ-VAE} (van den Oord et al.), nelle sezioni successive.
+\end{enumerate}
+
+\subsection{Vector Quantised-VAE (VQ-VAE)}
+
+\subsubsection{Idea}
+
+Il VQ-VAE è il primo modello a usare con successo \textbf{variabili latenti discrete}. Usa l'intero spazio latente ed evita il posterior collapse.
+
+Le slide motivano le rappresentazioni discrete dicendo che, rispetto a quelle continue, sono più adatte a
+ molte modalità e al ragionamento complesso, alla pianificazione e all'apprendimento predittivo: il linguaggio è discreto, 
+ il parlato è una sequenza di simboli, e le immagini si possono spesso descrivere in modo conciso con il linguaggio.
+
+\subsubsection{Architettura}
+
+Il VQ-VAE è un autoencoder \emph{standard}, con un encoder e un decoder. A differenza del VAE, lo spazio latente 
+non segue una distribuzione gaussiana.
+
+Lo spazio latente è definito da una tabella di lookup apprendibile, il \textbf{codebook}:
+\[
+\boxed{e \in \R^{K \times D}}
+\]
+\begin{itemize}
+  \item $K$ è la dimensione dello spazio latente discreto;
+  \item $D$ è la dimensione di ciascun embedding;
+  \item ognuno dei $K$ vettori $e_i \in \R^{D}$, $i = 1, \ldots, K$, si apprende con la discesa del gradiente.
+\end{itemize}
+
+\textbf{Forward.}
+\begin{enumerate}
+  \item l'input $x$ passa nell'encoder, che produce un output continuo $z_e(x)$;
+  \item i latenti discreti $z$ si calcolano con una ricerca del vicino più vicino nello spazio di embedding condiviso:
+  \[
+  \boxed{q(z = k \mid x) =
+  \begin{cases}
+  1 & \text{se } k = \argmin_j \|z_e(x) - e_j\|_2, \\
+  0 & \text{altrimenti}
+  \end{cases}}
+  \]
+  la distribuzione di proposta è \textbf{deterministica};
+  \item l'ingresso del decoder è il vettore di embedding corrispondente:
+  \[
+  \boxed{z_q(x) = e_k, \qquad k = \argmin_j \|z_e(x) - e_j\|_2}
+  \]
+  \item il decoder ricostruisce $x'$.
+\end{enumerate}
+
+\[
+x \longrightarrow \text{Encoder} \longrightarrow z_e(x) \longrightarrow \text{Nearest neighbour} \longrightarrow z_q(x) \longrightarrow \text{Decoder} \longrightarrow x'
+\]
+
+L'insieme dei parametri è l'unione dei parametri di encoder, decoder e codebook $e$.
+
+\begin{osservazione}[Esempio numerico (non nelle slide)]
+Con $K = 3$, $D = 2$, $e_1 = (0,0)$, $e_2 = (1,1)$, $e_3 = (-1,2)$ e $z_e = (0.8, 0.6)$, le 
+distanze euclidee sono circa $1.0$, $0.45$ e $2.28$. Quindi $k = 2$ e il decoder riceve $z_q = (1,1)$.
+\end{osservazione}
+
+\subsection{Apprendimento del VQ-VAE}
+
+\subsubsection{Straight-through estimator}
+
+La pipeline forward è un autoencoder normale con una non linearità particolare, che mappa 
+i latenti in un vettore di embedding 1-of-$K$. Questa operazione \textbf{non è differenziabile}: 
+\texttt{argmax}, \texttt{round} e \texttt{quantize} rompono il flusso del gradiente.
+
+\textbf{Soluzione.} Si approssimano i gradienti copiando il gradiente dall'ingresso del decoder 
+$z_q(x)$ all'uscita dell'encoder $z_e(x)$. In generale lo \textbf{Straight-Through Estimator} (STE) permette di addestrare:
+\begin{itemize}
+  \item usando l'output discreto nel forward;
+  \item facendo backpropagation come se l'operazione fosse l'identità.
+\end{itemize}
+
+\[
+\boxed{\text{Forward: } z_q = \mathrm{quantize}(z_e) \qquad \text{Backward: } \frac{\partial L}{\partial z_e} \approx \frac{\partial L}{\partial z_q}}
+\]
+
+Il trucco si usa anche nei \emph{binary neural gates} (forward come step, backward come sigmoide), 
+nella neural architecture search, nel routing e nel pruning.
+
+\subsubsection{La forma con \texttt{detach}}
+
+Nel VQ-VAE lo STE si implementa così:
+\[
+\boxed{z_q^{\mathrm{st}} = z_e + \operatorname{detach}(z_q - z_e)}
+\]
+\begin{itemize}
+  \item \textbf{Forward:} $z_q^{\mathrm{st}} = z_q$, quindi la quantizzazione viene eseguita;
+  \item \textbf{Backward:} il gradiente passa solo da $z_e$, quindi non è influenzato dalla quantizzazione.
+\end{itemize}
+In pratica la quantizzazione è trattata come l'identità durante la backpropagation: \emph{forward as step, backward as identity}.
+
+\subsubsection{Funzione obiettivo}
+
+Per effetto dello STE gli embedding $e_i$ non ricevono gradiente dalla loss di ricostruzione. 
+Per apprendere lo spazio di embedding il VQ-VAE usa il più semplice algoritmo di dictionary learning, la \textbf{Vector Quantisation} (VQ):
+\[
+\boxed{
+\begin{aligned}
+L ={}& \underbrace{\log p(x \mid z_q(x))}_{\text{ricostruzione}}
++ \underbrace{\|\operatorname{stopgrad}[z_e(x)] - z_q(x)\|_2^2}_{\text{Vector Quantisation (VQ)}} \\
+&+ \beta\, \underbrace{\|z_e(x) - \operatorname{stopgrad}[z_q(x)]\|_2^2}_{\text{commitment}}
+\end{aligned}}
+\]
+con $\operatorname{stopgrad}[\cdot]$ l'operatore di stop gradient: il suo argomento è una 
+\textbf{costante non aggiornata} durante la backpropagation.
+
+\begin{osservazione}[Segno del primo termine (non nelle slide)]
+Le slide scrivono il termine di ricostruzione come $\log p(x \mid z_q(x))$. Il termine va 
+massimizzato, quindi in una loss da minimizzare ha il segno meno: $-\log p(x \mid z_q(x))$. 
+Nell'algoritmo di training delle slide la ricostruzione è $\Loss_{\mathrm{rec}} = \|x - \hat{x}\|^2$.
+\end{osservazione}
+
+Chi ottimizza cosa:
+\begin{itemize}
+  \item il \textbf{decoder} ottimizza solo il primo termine;
+  \item l'\textbf{encoder} ottimizza il primo e l'ultimo;
+  \item la \textbf{tabella di lookup} (il codebook) ottimizza il termine centrale.
+\end{itemize}
+
+Il termine VQ usa la MSE per \textbf{spostare} i vettori $e_i$ verso gli output dell'encoder $z_e(x)$:
+ spinge ogni codeword a essere il più vicino possibile al vettore latente. Il termine di commitment spinge
+  l'encoder a restare ``impegnato'' sulla codeword scelta.
+
+\subsubsection{Passo di training}
+
+\begin{enumerate}
+  \item input: $x$, encoder $E$, decoder $D$, codebook $\{e_k\}_{k=1}^{K}$;
+  \item $z_e \leftarrow E(x)$;
+  \item $k \leftarrow \argmin_j \|z_e - e_j\|^2$;
+  \item $z_q \leftarrow e_k$;
+  \item $z_q^{\mathrm{st}} \leftarrow z_e + \operatorname{detach}(z_q - z_e)$ (STE);
+  \item $\hat{x} \leftarrow D(z_q^{\mathrm{st}})$;
+  \item $\Loss_{\mathrm{rec}} \leftarrow \|x - \hat{x}\|^2$;
+  \item $\Loss_{\mathrm{codebook}} \leftarrow \|\operatorname{stopgrad}[z_e] - z_q\|^2$;
+  \item $\Loss_{\mathrm{commit}} \leftarrow \|z_e - \operatorname{stopgrad}[z_q]\|^2$;
+  \item $\Loss \leftarrow \Loss_{\mathrm{rec}} + \Loss_{\mathrm{codebook}} + \beta\, \Loss_{\mathrm{commit}}$;
+  \item backpropagation e aggiornamento di modello e codebook.
+\end{enumerate}
+
+\subsection{VQ-VAE per la compressione di immagini}
+
+Il VQ-VAE si può usare come \textbf{compressore di immagini appreso}:
+\begin{itemize}
+  \item l'encoder mappa le immagini in codici latenti discreti;
+  \item il decoder ricostruisce l'immagine da quei codici;
+  \item gli indici del codebook si possono comprimere ulteriormente con l'\emph{entropy coding} (Huffman, codifica aritmetica).
+\end{itemize}
+
+Nelle slide la figura mostra immagini ImageNet $128 \times 128 \times 3$ e le loro ricostruzioni da un 
+VQ-VAE con spazio latente $32 \times 32 \times 1$ e $K = 512$.
+
+\begin{osservazione}[Rapporto di compressione (non nelle slide)]
+Con $K = 512$ ogni indice costa $\log_2 512 = 9$ bit. Assumendo pixel a 8 bit per canale, l'immagine
+ originale occupa $128 \cdot 128 \cdot 3 \cdot 8$ bit e la griglia di indici $32 \cdot 32 \cdot 9$ bit, 
+ cioè circa $42{,}7$ volte meno, prima dell'entropy coding.
+\end{osservazione}
+
+\textbf{Vantaggi.}
+\begin{itemize}
+  \item apprende feature specifiche del dominio, e a bitrate bassi supera i codec progettati a mano;
+  \item genera ricostruzioni visivamente coerenti con meno bit.
+\end{itemize}
+
+\textbf{Lavori correlati.} \emph{VQ-VAE-2} (Razavi et al., NeurIPS 2019, compressione multi-scala); 
+\emph{Neural Image Compression} (Ballé et al., ICLR 2017; Mentzer et al., CVPR 2018).
+
+\subsection{Campionare dal VQ-VAE: il problema della prior}
+
+Le slide mostrano campioni $128 \times 128$ generati da un VQ-VAE con una prior PixelCNN addestrata 
+su ImageNet (kit fox, balena grigia, orso bruno, farfalla, barriera corallina, alpe, microonde, pickup)
+ e pongono la domanda: come si possono campionare nuove immagini con il VQ-VAE?
+
+\textbf{Il problema.} Il VQ-VAE apprende un encoder, un decoder e un codebook di embedding, ma 
+\textbf{non apprende una prior} sui codici latenti. Si possono ricostruire gli input, ma non si possono generare facilmente nuovi campioni.
+
+\textbf{Soluzione: learned prior.} Non possiamo campionare direttamente dallo spazio latente discreto 
+perché non ne conosciamo la distribuzione. Prima si apprende questa distribuzione con un altro modello
+ generativo, poi si campiona dalla prior appresa e si decodifica con il decoder del VQ-VAE.
+\begin{enumerate}
+  \item si codificano i dati di training, ottenendo sequenze di codici latenti discreti;
+  \item si addestra un \textbf{modello generativo} su queste sequenze di codici;
+  \item dopo l'addestramento, per generare una singola immagine si campionano nuove sequenze di codici 
+  dalla prior appresa, e ogni latente dà la rappresentazione di una singola patch;
+  \item si decodificano i codici campionati con il decoder del VQ-VAE.
+\end{enumerate}
+
+\textbf{QUINDI:} il VQ-VAE rappresenta e ricostruisce i dati, la prior appresa dice quali sequenze di codici 
+sono plausibili. Il modello autoregressivo usato per la prior (PixelCNN) è l'argomento della parte successiva delle slide.
+
+\begin{importante}[Da saper dire a voce]
+Il gradiente non passa attraverso le operazioni discrete come \texttt{argmax}. Il VQ-VAE ha un encoder che 
+produce $z_e(x)$ e un codebook $e \in \R^{K \times D}$; il decoder riceve il vettore del codebook più 
+vicino, $z_q = e_k$ con $k = \argmin_j \|z_e - e_j\|$. Lo straight-through estimator usa il codice discreto nel 
+forward e copia il gradiente nel backward ($z_e + \operatorname{detach}(z_q - z_e)$). La loss ha tre termini: 
+ricostruzione (decoder ed encoder), Vector Quantisation (aggiorna il codebook) e commitment, con peso $\beta$ (aggiorna l'encoder). 
+Evita il posterior collapse e si può usare per comprimere le immagini. Non apprende una prior sui codici, quindi per generare si 
+addestra un altro modello generativo sulle sequenze di codici.
 \end{importante}
 
 \end{document}
