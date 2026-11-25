@@ -15,6 +15,7 @@
 \usepackage{caption}
 \usepackage{hyperref}
 \usepackage{float}
+\usetikzlibrary{arrows.meta,shapes.geometric,positioning,calc,shapes.misc,fit,backgrounds}
 
 \hypersetup{colorlinks=true, linkcolor=NavyBlue, urlcolor=NavyBlue, pdftitle={Appunti di Machine Learning e Reti Neurali}}
 
@@ -5069,5 +5070,721 @@ addestra un altro modello generativo sulle sequenze di codici.
   in nuove immagini.
 \end{itemize}
 
-.
+%=====================================================================
+\section{Modelli autoregressivi: PixelCNN}
+%=====================================================================
+
+\subsection{Obiettivo: apprendere una prior sui codici}
+Il VQ-VAE ricostruisce l'input ma non apprende una prior sui codici latenti,
+quindi da solo non genera. Serve un modello che impari quali sequenze di codici
+sono plausibili.
+
+Codificando il training set con l'encoder si ottengono sequenze di 
+indici del codebook:
+\[
+\{z^{(i)}=(z^{(i)}_1,\dots,z^{(i)}_T)\}_{i=1}^{N}, \qquad z^{(i)}_t\in\{1,\dots,K\},
+\]
+con $N$ numero di esempi, $T$ numero di codici per esempio e $K$ dimensione 
+del codebook.
+Per le immagini la griglia latente $H\times W$ si dispone in sequenza 
+(scansione \emph{raster}).
+
+Si vuole imparare una distribuzione parametrica:
+\[
+p_{\theta_z}(z),\qquad z=(z_1,\ldots,z_T),\quad z_t\in\{1,\ldots,K\}.
+\]
+Questa distribuzione è la \textbf{learned prior}: descrive quali sequenze di codici
+latenti si presentano nei dati e quali sono probabili.
+
+\subsection{Chain rule}
+Dalla probabilità condizionata $p(A,B)=p(A\mid B)\,p(B)$, applicata ricorsivamente:
+\[
+p(z_1,z_2,z_3)=p(z_3\mid z_1,z_2)\,p(z_2\mid z_1)\,p(z_1)
+\quad\Longrightarrow\quad
+\boxed{p_{\theta_z}(z)=\prod_{t=1}^{T}p_{\theta_z}(z_t\mid z_{<t})}
+\]
+dove $z_{<t}=(z_1,\dots,z_{t-1})$. Il primo fattore, $p(z_1)$, non ha contesto.
+
+Ogni codice appartiene a $K$ categorie, quindi la condizionata è una categorica:
+\[
+p_{\theta_z}(z_t\mid z_{<t})=\operatorname{Cat}\big(z_t;\boldsymbol{\pi}_{\theta_z}(z_{<t})\big),
+\qquad \pi_k\ge 0,\quad \sum_{k=1}^{K}\pi_k=1 .
+\]
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    >=Stealth,
+    font=\small,
+    token/.style={draw=NavyBlue, fill=fmapcol, minimum size=0.55cm, font=\bfseries\small},
+    neuron/.style={circle, draw=black!75, minimum size=0.38cm, inner sep=0pt, fill=white}
+]
+
+% 1. Griglia latente (3x3)
+\begin{scope}[local bounding box=grid]
+    \foreach \x in {0,1,2} {
+        \foreach \y in {0,1,2} {
+            \draw[fill=gray!6, draw=black!60] (\x*0.55, -\y*0.55) rectangle ++(0.55, -0.55);
+        }
+    }
+    \draw[fill=fmapcol, draw=NavyBlue, thick] (0, 0) rectangle ++(0.55, -0.55);
+    \node[text=NavyBlue] at (0.275, -0.275) {\textbf{3}};
+\end{scope}
+\node[below=0.15cm of grid, font=\scriptsize\sffamily, align=center] {Griglia latente\\(indici codebook)};
+
+% 2. Token estratto z_1
+\node[token, right=0.8cm of grid.east] (z1) {3};
+\node[above=0.08cm of z1, font=\footnotesize] {$z_1$};
+\draw[->, thick] (grid.east) -- (z1.west);
+
+% 3. Rete Autoregressiva + Softmax
+\node[neuron, right=0.8cm of z1] (in) {};
+\node[neuron, above right=0.5cm and 0.75cm of in] (h1) {};
+\node[neuron, right=0.75cm of in] (h2) {};
+\node[neuron, below right=0.5cm and 0.75cm of in] (h3) {};
+
+\foreach \i in {1,2,3,4} {
+    \node[neuron, right=0.75cm of h2, yshift={(2.5-\i)*0.4cm}] (out\i) {};
+}
+
+\foreach \h in {h1,h2,h3} {
+    \draw[->, black!70] (in) -- (\h);
+    \foreach \o in {out1,out2,out3,out4} {
+        \draw[->, black!35] (\h) -- (\o);
+    }
+}
+\draw[->, thick] (z1.east) -- (in.west);
+
+\node[right=0.38cm of $(out1)!0.5!(out4)$, font=\scriptsize\sffamily\bfseries, rotate=-90, anchor=center] (smax) {Softmax};
+
+\begin{scope}[on background layer]
+    \node[draw=NavyBlue!70, rounded corners=4pt, fill=blue!3, fit=(in)(h1)(h3)(out1)(out4)(smax), inner sep=6pt, label={[font=\scriptsize\sffamily\bfseries, text=NavyBlue]above:Modello Autoregressivo}] (nn) {};
+\end{scope}
+
+% 4. Vettore di probabilità di dimensione K
+\node[right=0.9cm of nn.east] (vec) {
+    \begin{tikzpicture}[scale=0.5]
+        \foreach \i in {0,...,4} {
+            \draw[fill=fmapcol, draw=NavyBlue!80] (\i*0.6, 0) rectangle ++(0.6, 0.8);
+        }
+        \node[font=\scriptsize\sffamily] at (1.5, -0.45) {Dimensione $K$};
+    \end{tikzpicture}
+};
+\node[above=0.05cm of vec, font=\footnotesize] {$p_{\theta_z}(z_2 \mid z_1) = \mathrm{Cat}(z_2;\, \pi_{\theta_z}(z_1))$};
+\node[right=0.35cm of vec, font=\scriptsize\sffamily, text=notecol, align=left, draw=notecol!40, rounded corners=2pt, fill=blue!3, inner sep=4pt] (note) {
+    Probabilità di selezionare\\ciascuno dei $K$ vettori\\dal \emph{codebook}
+};
+\draw[->, thick] (nn.east) -- (vec.west);
+
+% 5. Grafico della distribuzione categorica (PGFPlots)
+\node[below=1.15cm of vec] (plot) {
+    \begin{tikzpicture}
+        \begin{axis}[
+            ybar,
+            clip=false,
+            width=7.8cm,
+            height=4.3cm,
+            bar width=0.52cm,
+            ymin=0, ymax=1.0,
+            xmin=0.4, xmax=5.6,
+            ylabel={Probabilità},
+            xlabel={Categoria ($z_t \in \{1,\dots,K\}$)},
+            xtick={1,2,3,4,5},
+            ytick={0,0.2,0.4,0.6,0.8,1.0},
+            nodes near coords,
+            nodes near coords style={
+                font=\scriptsize,
+                /pgf/number format/fixed,
+                /pgf/number format/precision=2
+            },
+            title={Esempio di Distribuzione Categorica ($K = 5$)},
+            title style={font=\footnotesize\bfseries},
+            label style={font=\footnotesize},
+            tick label style={font=\scriptsize}
+        ]
+        \addplot[fill=fmapcol, draw=NavyBlue] coordinates {
+            (1, 0.11)
+            (2, 0.58)
+            (3, 0.03)
+            (4, 0.12)
+            (5, 0.15)
+        };
+        \end{axis}
+    \end{tikzpicture}
+};
+
+% Riquadri con le due strategie a sinistra del grafico
+\node[left=0.85cm of plot.west, yshift=0.35cm, anchor=east, font=\scriptsize, align=left, text=notecol, draw=notecol!30, rounded corners=2pt, fill=blue!2, inner sep=5pt] (opt1) {
+    \textbf{1. Greedy ($\argmax$):}\\
+    Prendo quello con prob. massima\\
+    ($z_t = 2$, $p=0.58$)
+};
+
+\node[below=0.3cm of opt1.south west, anchor=north west, font=\scriptsize, align=left, text=notecol, draw=notecol!30, rounded corners=2pt, fill=blue!2, inner sep=5pt] (opt2) {
+    \textbf{2. Sampling stocastico:}\\
+    Estraggo $z_t \sim \mathrm{Cat}(\pi_{\theta_z})$\\
+    in base alle probabilità
+};
+
+\draw[->, thick] (vec.south) -- node[right, font=\scriptsize\sffamily] {Output} (plot.north);
+
+\end{tikzpicture}%
+}
+\caption{Schema del campionamento autoregressivo su variabili latenti discrete:
+ dato il contesto precedente ($z_1 = 3$), la rete produce tramite Softmax una distribuzione categorica sui $K$ indici del codebook da cui estrarre $z_2$.}
+\end{figure}
+
+Una rete neurale riceve il contesto e predice il vettore $\boldsymbol{\pi}$.
+ Si possono usare \textbf{PixelRNN} (ricorrente), 
+ \textbf{PixelCNN} (convoluzionale) o un \textbf{Transformer}.
+
+%---------------------------------------------------------------------
+\subsection{PixelCNN}
+%---------------------------------------------------------------------
+
+Modella una griglia discreta $z\in\{1,\dots,K\}^{H\times W}$ in ordine raster
+(da sinistra a destra, dall'alto in basso):
+\[
+\boxed{p_{\theta_z}(z)=\prod_{i=1}^{H}\prod_{j=1}^{W}p_{\theta_z}(z_{i,j}\mid z_{<i,j})}
+\]
+$z_{<i,j}$ sono i codici che precedono $(i,j)$ nell'ordine scelto. Ogni condizionata è una
+categorica predetta da una CNN con \textbf{convoluzioni mascherate}, che non può usare i codici futuri.
+
+\begin{center}
+\begin{tikzpicture}[cella/.style={draw,minimum size=1cm,inner sep=0pt}]
+\foreach \i in {0,1,2}{\foreach \j in {0,1,2}{
+  \node[cella,fill=gray!10] at (\j,-\i) {$z_{\i,\j}$};}}
+\foreach \j in {0,1,2}{\node[cella,fill=fmapcol] at (\j,0) {$z_{0,\j}$};}
+\node[cella,fill=orange!40] at (0,-1) {$z_{1,0}$};
+\node[anchor=west,font=\small,align=left] at (3.0,-0.5)
+  {azzurro: già generati (contesto)\\arancione: posizione da predire\\grigio: futuro, non visibile};
+\end{tikzpicture}
+\captionof{figure}{Ordine raster su una griglia $3\times3$: per predire $z_{1,0}$ il contesto è la prima riga}
+\end{center}
+
+\subsubsection{Sampling}
+\begin{enumerate}
+  \item si parte da una griglia vuota;
+  \item per ogni posizione $(i,j)$ in ordine raster si esegue PixelCNN e si ottiene $\boldsymbol{\pi}_{\theta_z}(z_{<i,j})$;
+  \item si campiona $z_{i,j}\sim p_{\theta_z}(z_{i,j}\mid z_{<i,j})$ e lo si inserisce nella griglia;
+  \item si continua fino a completare la griglia.
+\end{enumerate}
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    >=Stealth,
+    font=\small,
+    cell/.style={draw=black!65, minimum size=0.55cm, inner sep=0pt, font=\scriptsize\bfseries},
+    boxnn/.style={draw=NavyBlue, thick, rounded corners=4pt, fill=blue!4, minimum width=2.1cm, minimum height=2.2cm, align=center}
+]
+
+% --- PASSO 1: Griglia con z_1 = 78 già campionato ---
+\begin{scope}[local bounding box=g1]
+    \node[cell, fill=fmapcol, text=NavyBlue] (c00) at (0,0) {78};
+    \node[cell, fill=orange!25, text=orange!80!black] (c01) at (0.55,0) {?};
+    \node[cell, fill=gray!10] (c02) at (1.10,0) {};
+    \foreach \x in {0, 0.55, 1.10} {
+        \node[cell, fill=gray!10] at (\x,-0.55) {};
+        \node[cell, fill=gray!10] at (\x,-1.10) {};
+    }
+\end{scope}
+\node[above=0.12cm of g1, font=\scriptsize\sffamily, align=center] {\textbf{1.} Griglia al passo $t=2$\\($z_1=78$ fissato)};
+
+% --- PASSO 2: Singola Rete PixelCNN ---
+\node[boxnn, right=1.3cm of g1] (net) {
+    \textbf{PixelCNN}\\
+    $p_\theta$\\[3pt]
+    \scriptsize\sffamily (1 solo modello\\
+    \scriptsize\sffamily con conv. mascherate)
+};
+\draw[->, thick] (g1.east) -- node[above, font=\scriptsize\sffamily] {input $H{\times}W$} (net.west);
+
+% --- PASSO 3: Output Softmax per ogni posizione ---
+\node[right=1.4cm of net.north east, anchor=north west, font=\scriptsize] (s1) {$\mathrm{Softmax}(z_1) \;\rightarrow\; \text{già usato } (78)$};
+\node[below=0.22cm of s1.south west, anchor=north west, font=\scriptsize, text=notecol, draw=notecol!40, fill=blue!2, rounded corners=2pt, inner sep=3pt] (s2) {$\mathrm{Softmax}(z_2 \mid z_1=78) \;\rightarrow\; \text{campiono } \mathbf{32}$};
+\node[below=0.22cm of s2.south west, anchor=north west, font=\scriptsize, text=gray] (s3) {$\mathrm{Softmax}(z_3 \mid z_1, z_2) \;\rightarrow\; \dots$};
+
+\draw[->, thick, black!50] (net.east |- s1) -- (s1.west);
+\draw[->, thick, notecol] (net.east |- s2) -- (s2.west);
+\draw[->, thick, black!30] (net.east |- s3) -- (s3.west);
+
+% --- PASSO 4: Freccia di feedback per aggiornare la griglia ---
+\draw[->, thick, dashed, notecol] (s2.south) -- ++(0,-1.2) -| node[pos=0.25, below, font=\scriptsize\sffamily] {Aggiorno la griglia con $z_2 = 32$ e ripeto per $z_3$} (g1.south);
+
+\end{tikzpicture}%
+}
+\caption{Generazione autoregressiva sequenziale con una singola PixelCNN: ad ogni passo l'intera griglia viene elaborata dallo stesso modello mascherato e si campiona il codice successivo.}
+\end{figure}
+
+\begin{osservazione}[Costo del sampling]
+Ogni codice dipende dai precedenti, quindi servono $HW$ passi sequenziali (un forward pass per posizione).
+Il sampling è lento rispetto ai modelli che generano in un solo passaggio.
+\end{osservazione}
+
+%---------------------------------------------------------------------
+\subsection{Convoluzioni causali}
+%---------------------------------------------------------------------
+
+Una convoluzione standard potrebbe leggere codici futuri (\emph{information leakage}).
+Si applica quindi una maschera binaria $M$ al kernel:
+\[
+W_{\mathrm{masked}}=W\odot M,
+\]
+cioè i pesi nelle posizioni proibite sono azzerati prima della convoluzione.
+
+\begin{itemize}
+  \item \textbf{Maschera di tipo A}: esclude anche la posizione corrente $(i,j)$. Si usa nel \emph{primo} layer,
+  così il valore da predire non è visibile.
+  \item \textbf{Maschera di tipo B}: include la posizione corrente nelle feature map intermedie. Si usa nei layer successivi.
+\end{itemize}
+Il tipo B non viola la causalità: il primo layer ha già escluso il valore originale, quindi i layer successivi
+lavorano su feature che non lo contengono.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    font=\small,
+    cell1/.style={draw=black!65, fill=fmapcol, minimum size=0.52cm, inner sep=0pt, font=\scriptsize\bfseries, text=NavyBlue},
+    cell0/.style={draw=black!45, fill=gray!12, minimum size=0.52cm, inner sep=0pt, font=\scriptsize, text=gray!80!black},
+    centerA/.style={draw=red!80!black, very thick, fill=red!12, minimum size=0.52cm, inner sep=0pt, font=\scriptsize\bfseries, text=red!80!black},
+    centerB/.style={draw=NavyBlue, very thick, fill=orange!30, minimum size=0.52cm, inner sep=0pt, font=\scriptsize\bfseries, text=NavyBlue}
+]
+
+% --- MASK A (5x5) ---
+\begin{scope}[local bounding box=maskA]
+    \foreach \r in {0,...,4} {
+        \foreach \c in {0,...,4} {
+            \pgfmathtruncatemacro{\idx}{\r*5 + \c}
+            \ifnum\idx<12
+                \node[cell1] at (\c*0.52, -\r*0.52) {1};
+            \else
+                \ifnum\idx=12
+                    \node[centerA] at (\c*0.52, -\r*0.52) {0};
+                \else
+                    \node[cell0] at (\c*0.52, -\r*0.52) {0};
+                \fi
+            \fi
+        }
+    }
+\end{scope}
+\node[above=0.18cm of maskA, font=\footnotesize\bfseries, text=NavyBlue] {Maschera di tipo A};
+\node[below=0.18cm of maskA, font=\scriptsize\sffamily, align=center] {Primo layer:\\esclude anche $(i,j)$};
+
+% --- MASK B (5x5) ---
+\begin{scope}[xshift=5.2cm, local bounding box=maskB]
+    \foreach \r in {0,...,4} {
+        \foreach \c in {0,...,4} {
+            \pgfmathtruncatemacro{\idx}{\r*5 + \c}
+            \ifnum\idx<12
+                \node[cell1] at (\c*0.52, -\r*0.52) {1};
+            \else
+                \ifnum\idx=12
+                    \node[centerB] at (\c*0.52, -\r*0.52) {1};
+                \else
+                    \node[cell0] at (\c*0.52, -\r*0.52) {0};
+                \fi
+            \fi
+        }
+    }
+\end{scope}
+\node[above=0.18cm of maskB, font=\footnotesize\bfseries, text=NavyBlue] {Maschera di tipo B};
+\node[below=0.18cm of maskB, font=\scriptsize\sffamily, align=center] {Layer successivi:\\include $(i,j)$ sulle feature map};
+
+% --- LEGENDA A DESTRA ---
+\node[right=0.9cm of maskB.east, anchor=west, font=\scriptsize\sffamily, align=left] (leg) {
+    \tikz{\node[cell1, minimum size=0.35cm] {1};} \; Contesto passato ($<i,j$)\\[4pt]
+    \tikz{\node[centerA, minimum size=0.35cm] {0};} \; Posizione $(i,j)$ bloccata\\[4pt]
+    \tikz{\node[centerB, minimum size=0.35cm] {1};} \; Posizione $(i,j)$ visibile\\[4pt]
+    \tikz{\node[cell0, minimum size=0.35cm] {0};} \; Posizioni future ($>i,j$)
+};
+
+\end{tikzpicture}
+\caption{Confronto tra le maschere binarie $5\times 5$ applicate ai kernel convoluzionali ($W_{\mathrm{masked}} = W \odot M$): nel primo layer la maschera A azzera anche il peso centrale $(i,j)$ per impedire l'\emph{information leakage}, mentre nei layer successivi la maschera B lo riabilita sulle feature map già causali.}
+\end{figure}
+
+\textbf{Blind spot e Gated PixelCNN.} Una pila semplice di convoluzioni mascherate lascia fuori dal \emph{receptive field} alcune posizioni precedenti in alto a destra rispetto a $(i,j)$ (\emph{blind spot}). Per coprire l'intero contesto causale senza punti ciechi, la \textbf{Gated PixelCNN} separa il flusso in due stack combinati con porte $\tanh$ e $\sigma$ (ispirate alle LSTM):
+\begin{itemize}
+  \item \textbf{Stack verticale (azzurro/blu):} elabora tutte le righe strettamente precedenti ($< i$) senza tagli diagonali, eliminando il \emph{blind spot}.
+  \item \textbf{Stack orizzontale (viola):} elabora la riga corrente ($i$) a sinistra della colonna $j$ (kernel $1 \times n$) e integra l'informazione dello stack verticale tramite una convoluzione $1 \times 1$.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    >=Stealth,
+    font=\small,
+    vstack/.style={draw=NavyBlue, thick, rounded corners=3pt, fill=fmapcol, minimum width=2.4cm, minimum height=0.85cm, align=center, font=\scriptsize\sffamily},
+    hstack/.style={draw=inpur, thick, rounded corners=3pt, fill=inpur!15, minimum width=2.4cm, minimum height=0.85cm, align=center, font=\scriptsize\sffamily},
+    conv1x1/.style={draw=notecol, thick, rounded corners=2pt, fill=blue!6, minimum width=1.15cm, minimum height=0.52cm, align=center, font=\scriptsize\sffamily},
+    gate/.style={circle, draw=black!75, fill=orange!20, minimum size=0.6cm, inner sep=0pt, font=\scriptsize\bfseries},
+    op/.style={circle, draw=black!75, fill=white, minimum size=0.46cm, inner sep=0pt, font=\scriptsize\bfseries},
+    split/.style={diamond, draw=NavyBlue, fill=fmapcol, minimum size=0.34cm, inner sep=0pt},
+    cell/.style={draw=black!60, minimum size=0.46cm, inner sep=0pt, font=\scriptsize}
+]
+
+% ================= PARTE DESTRA: BLOCCO GATED PIXELCNN =================
+% --- Stack Verticale (Blu/Azzurro) ---
+\node[vstack] (vconv) at (0,0) {\textbf{Stack Verticale}\\Conv. $n \times n$};
+\node[below=0.65cm of vconv, font=\scriptsize\sffamily, text=NavyBlue] (vin) {in verticale};
+\draw[->, thick, NavyBlue] (vin) -- (vconv);
+
+% Rombo split e gate verticali
+\node[split, above=0.85cm of vconv] (vsplit) {};
+\draw[thick, NavyBlue] (vconv.north) -- node[left, font=\scriptsize] {$2p$} (vsplit.south);
+
+\node[gate, above left=0.45cm and 0.35cm of vsplit] (vtanh) {$\tanh$};
+\node[gate, above right=0.45cm and 0.35cm of vsplit] (vsig) {$\sigma$};
+\node[op, above=1.35cm of vsplit] (vmul) {$\times$};
+
+\draw[thick, NavyBlue] (vsplit.west) -| node[pos=0.25, below, font=\scriptsize] {$p$} (vtanh.south);
+\draw[thick, NavyBlue] (vsplit.east) -| node[pos=0.25, below, font=\scriptsize] {$p$} (vsig.south);
+\draw[thick, NavyBlue] (vtanh.north) |- (vmul.west);
+\draw[thick, NavyBlue] (vsig.north) |- (vmul.east);
+
+% --- Stack Orizzontale (Viola) ---
+\node[hstack, right=3.2cm of vconv] (hconv) {\textbf{Stack Orizzontale}\\Conv. $1 \times n$};
+\node[below=0.65cm of hconv, font=\scriptsize\sffamily, text=inpur] (hin) {in orizzontale};
+\draw[->, thick, inpur] (hin) -- (hconv);
+
+% Somma con il contributo 1x1 dallo stack verticale
+\node[op, above=0.42cm of hconv] (hadd) {$+$};
+\draw[->, thick, inpur] (hconv.north) -- (hadd.south);
+
+\coordinate (vbranch) at (vconv.north |- hadd.west);
+\node[conv1x1] (vtoh) at ($(vbranch)!0.5!(hadd.west)$) {conv $1{\times}1$};
+\draw[thick, notecol] (vbranch) -- (vtoh.west);
+\draw[->, thick, notecol] (vtoh.east) -- (hadd.west);
+
+% Rombo split e gate orizzontali
+\node[split, above=0.42cm of hadd] (hsplit) {};
+\draw[thick, inpur] (hadd.north) -- node[left, font=\scriptsize] {$2p$} (hsplit.south);
+
+\node[gate, above left=0.45cm and 0.35cm of hsplit] (htanh) {$\tanh$};
+\node[gate, above right=0.45cm and 0.35cm of hsplit] (hsig) {$\sigma$};
+\node[op, above=1.35cm of hsplit] (hmul) {$\times$};
+
+\draw[thick, inpur] (hsplit.west) -| node[pos=0.25, below, font=\scriptsize] {$p$} (htanh.south);
+\draw[thick, inpur] (hsplit.east) -| node[pos=0.25, below, font=\scriptsize] {$p$} (hsig.south);
+\draw[thick, inpur] (htanh.north) |- (hmul.west);
+\draw[thick, inpur] (hsig.north) |- (hmul.east);
+
+% Conv 1x1 superiore e somma residua
+\node[conv1x1, above=0.45cm of hmul, draw=inpur, fill=inpur!10, text=inpur] (hout1x1) {conv $1{\times}1$};
+\draw[thick, inpur] (hmul.north) -- (hout1x1.south);
+
+\node[op, right=1.15cm of hout1x1] (hres) {$+$};
+\draw[->, thick, inpur] (hout1x1.east) -- node[above, font=\scriptsize] {$p$} (hres.west);
+
+% Ramo residuo interno al riquadro tratteggiato
+\coordinate (hskipstart) at ($(hin.north)!0.42!(hconv.south)$);
+\coordinate (hskipcorner) at (hskipstart -| hres.south);
+\draw[thick, inpur] (hskipstart) -- (hskipcorner) -- node[pos=0.5, right, font=\scriptsize] {$p$} (hres.south);
+
+% Riquadro tratteggiato del blocco Gated (include anche hskipcorner)
+\begin{scope}[on background layer]
+    \node[draw=black!65, dashed, thick, rounded corners=4pt, fit=(vconv)(vtanh)(hconv)(hsig)(hout1x1)(hres)(hskipcorner), inner sep=9pt] (gatedbox) {};
+\end{scope}
+
+% Uscite superiori allineate alla stessa quota fuori dal riquadro tratteggiato
+\coordinate (topexit) at ($(gatedbox.north) + (0, 0.45cm)$);
+\draw[->, thick, NavyBlue] (vmul.north) -- node[pos=0.35, right, font=\scriptsize] {$p$} (vmul.north |- topexit) node[above, font=\scriptsize\sffamily] {out verticale};
+\draw[->, thick, inpur] (hres.north) -- (hres.north |- topexit) node[above, font=\scriptsize\sffamily] {out orizzontale};
+
+% ================= PARTE SINISTRA: GRIGLIA E LEGENDA BEN STACCATE =================
+\begin{scope}[shift={(-5.4cm, 2.85cm)}, local bounding box=grid]
+    \foreach \r in {0,...,4} {
+        \foreach \c in {0,...,4} {
+            \ifnum\r<2
+                \node[cell, fill=fmapcol] at (\c*0.46, -\r*0.46) {};
+            \else
+                \ifnum\r=2
+                    \ifnum\c<2
+                        \node[cell, fill=inpur!25] at (\c*0.46, -\r*0.46) {};
+                    \else
+                        \ifnum\c=2
+                            \node[cell, fill=orange!35, draw=NavyBlue, thick, font=\scriptsize\bfseries] at (\c*0.46, -\r*0.46) {$z_{i,j}$};
+                        \else
+                            \node[cell, fill=gray!12] at (\c*0.46, -\r*0.46) {};
+                        \fi
+                    \fi
+                \else
+                    \node[cell, fill=gray!12] at (\c*0.46, -\r*0.46) {};
+                \fi
+            \fi
+        }
+    }
+\end{scope}
+
+\node[above=0.18cm of grid, font=\footnotesize\bfseries, text=NavyBlue] {Copertura senza Blind Spot};
+\node[below=0.28cm of grid.south, anchor=north, font=\scriptsize\sffamily, align=left] (leggrid) {
+    \tikz{\node[cell, fill=fmapcol, minimum size=0.3cm] {};} \; Verticale (righe $<i$)\\[3pt]
+    \tikz{\node[cell, fill=inpur!25, minimum size=0.3cm] {};} \; Orizzontale (col $<j$)\\[3pt]
+    \tikz{\node[cell, fill=gray!12, minimum size=0.3cm] {};} \; Futuro bloccato
+};
+
+\end{tikzpicture}%
+}
+\caption{Blocco della Gated PixelCNN: lo stack verticale (azzurro) cattura tutte le righe superiori senza \emph{blind spot} e alimenta orizzontalmente lo stack orizzontale (viola) tramite una convoluzione $1\times 1$. Le feature map ($2p$) vengono divise in due rami da $p$ canali per le porte $\tanh \odot \sigma$ e ricombinate con connessione residua.}
+\end{figure}
+
+%---------------------------------------------------------------------
+\subsection{Training}
+%---------------------------------------------------------------------
+
+Si massimizza la \textbf{log-likelihood}, cioè si minimizza la negative log-likelihood:
+\[
+\boxed{\Loss(\theta_z)=-\sum_{i,j}\log p_{\theta_z}(z_{i,j}\mid z_{<i,j})}
+\]
+Ogni posizione produce una distribuzione discreta, per esempio una softmax, su $K$ categorie. La loss è la cross-entropy tra $\boldsymbol{\pi}$ e il target one-hot $\mathbf{y}$:
+\[
+\operatorname{CE}(\mathbf{y},\boldsymbol{\pi})=-\sum_{k=1}^{K}y_k\log\pi_k ,
+\]
+cioè $-\log$ della probabilità assegnata alla categoria corretta. Il target è l'indice del codice (spazio latente VQ-VAE)
+oppure il valore del pixel (se si lavora sui pixel).
+
+\textbf{Teacher forcing.} In training i valori ground-truth sono già disponibili e si usano come contesto:
+\begin{itemize}
+  \item il modello non costruisce il contesto con le proprie predizioni;
+  \item PixelCNN predice le distribuzioni di \emph{tutte} le posizioni in un solo forward;
+  \item la cross-entropy si calcola per posizione e poi si fa backpropagation.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    >=Stealth,
+    font=\small,
+    cell/.style={draw=black!65, minimum size=0.52cm, inner sep=0pt, font=\scriptsize\bfseries},
+    boxnn/.style={draw=NavyBlue, thick, rounded corners=4pt, fill=blue!4, minimum width=2.1cm, minimum height=1.8cm, align=center},
+    prob/.style={draw=black!60, minimum width=0.36cm, minimum height=0.44cm, inner sep=0pt, font=\tiny}
+]
+
+% 1. Griglia Ground-Truth 3x3 in input
+\begin{scope}[local bounding box=gt]
+    \node[cell, fill=gray!8] at (0,0) {1};
+    \node[cell, fill=orange!30, draw=NavyBlue, thick, text=NavyBlue] (c2) at (0.52,0) {4};
+    \node[cell, fill=gray!8] at (1.04,0) {3};
+    \node[cell, fill=gray!8] at (0,-0.52) {2};
+    \node[cell, fill=gray!8] at (0.52,-0.52) {1};
+    \node[cell, fill=gray!8] at (1.04,-0.52) {3};
+    \node[cell, fill=gray!8] at (0,-1.04) {5};
+    \node[cell, fill=gray!8] at (0.52,-1.04) {6};
+    \node[cell, fill=gray!8] at (1.04,-1.04) {2};
+\end{scope}
+\node[below=0.15cm of gt, font=\scriptsize\sffamily, align=center] {Griglia reale ($3{\times}3$)\\(tutti i valori noti)};
+
+% 2. PixelCNN (1 forward pass)
+\node[boxnn, right=1.3cm of gt] (net) {
+    \textbf{PixelCNN}\\
+    $p_{\theta_z}$\\[3pt]
+    \scriptsize\sffamily (1 forward pass\\
+    \scriptsize\sffamily con Mask A/B)
+};
+\draw[->, thick] (gt.east) -- (net.west);
+
+% 3. Output: 9 distribuzioni (3x3xK)
+\node[right=1.4cm of net.north east, anchor=north west, font=\scriptsize\sffamily] (d1) {Pos. 1: $\boldsymbol{\pi}_1 \;\rightarrow\; \text{CE}(\boldsymbol{\pi}_1,\, y_1{=}1)$};
+
+\node[below=0.25cm of d1.south west, anchor=north west, font=\scriptsize\sffamily, text=notecol, draw=notecol!45, fill=blue!2, rounded corners=2pt, inner sep=3.5pt] (d2) {Pos. 2: $\boldsymbol{\pi}_2 \;\rightarrow\; \text{CE}(\boldsymbol{\pi}_2,\, y_2{=}\mathbf{4})$};
+
+\node[below=0.25cm of d2.south west, anchor=north west, font=\scriptsize\sffamily, text=gray!80!black] (d9) {Pos. $3\dots 9$: $\boldsymbol{\pi}_p \;\rightarrow\; \text{CE}(\boldsymbol{\pi}_p,\, y_p)$};
+
+\draw[->, thick, black!55] (net.east |- d1) -- (d1.west);
+\draw[->, thick, notecol] (net.east |- d2) -- (d2.west);
+\draw[->, thick, black!35] (net.east |- d9) -- (d9.west);
+
+\node[above=0.14cm of d1.north west, anchor=south west, font=\scriptsize\sffamily\bfseries, text=NavyBlue] (outlab) {Output: $3{\times}3{\times}K$ (9 distribuzioni)};
+
+% 4. Freccia superiore ben distanziata sopra tutte le scritte
+\draw[->, thick, dashed, orange!85!black] (c2.north) -- ++(0, 1.15) -| node[pos=0.28, above=2pt, font=\scriptsize\sffamily, text=orange!80!black] {Il valore in input ($4$) fa da target per la Pos. 2 (Mask A lo nasconde al layer 1)} (d2.north);
+
+% 5. Dettaglio vettore one-hot target per Pos. 2 in basso a destra
+\node[below=0.45cm of d9.south west, anchor=north west] (onehot) {
+    \begin{tikzpicture}[scale=0.95]
+        \node[font=\scriptsize\sffamily, anchor=east] at (0.05, 0.22) {Target $\mathbf{y}_2$:};
+        \foreach \k/\val/\col in {1/0/gray!10, 2/0/gray!10, 3/0/gray!10, 4/1/orange!35, 5/0/gray!10, 6/0/gray!10} {
+            \node[prob, fill=\col] at (\k*0.38, 0.22) {\val};
+            \node[font=\tiny] at (\k*0.38, -0.15) {\k};
+        }
+    \end{tikzpicture}
+};
+
+\end{tikzpicture}%
+}
+\caption{Meccanismo del \emph{Teacher Forcing} nella PixelCNN: l'intera griglia reale entra in un solo passaggio e produce tutte le $H\times W$ distribuzioni categoriche in parallelo. Ogni cella dell'input funge da target per la Cross-Entropy della rispettiva posizione (es. la cella 2 con valore $4$).}
+\end{figure}
+
+\textbf{QUINDI:} il training è parallelo ed efficiente, il sampling resta sequenziale.
+
+%---------------------------------------------------------------------
+\subsection{Likelihood e anomaly detection}
+%---------------------------------------------------------------------
+
+La likelihood è esplicita:
+\[
+\log p(x)=\sum_{i,j}\log p(x_{i,j}\mid x_{<i,j}),
+\]
+e grazie alle maschere si calcola con un solo forward pass. Ogni immagine riceve quindi un punteggio.
+
+Le \textit{APPLICAZIONI} possono essere:
+\begin{itemize}
+  \item \textbf{Anomaly detection}: immagini insolite hanno likelihood bassa;
+  \item \textbf{Novelty detection}: i campioni out-of-distribution si individuano confrontando il punteggio con una soglia.
+\end{itemize}
+Un punteggio basso indica poca plausibilità rispetto alla distribuzione appresa, non è una prova di anomalia.
+
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{Immagini/Screenshot 2026-11-25 191335.png}
+\caption{Novelty detection nello spazio latente (Abati et al., 2019): \textbf{(a)} il
+ \emph{novelty score} combina l'errore di ricostruzione $\|x - \tilde{x}\|^2$ (\emph{memory}) 
+ con la \emph{surprisal} $-\log P(z)$ stimata da una rete autoregressiva sulle distribuzioni condizionate 
+ del vettore latente $z$; \textbf{(b)} all'ingresso del furgone il punteggio sale e la \emph{localization map} individua l'anomalia nel frame.}
+\end{figure}
+%---------------------------------------------------------------------
+\subsection{Pipeline VQ-VAE + PixelCNN}
+%---------------------------------------------------------------------
+\begin{description}
+\item[VQ-VAE:] apprende uno spazio latente discreto con vector quantization. L'encoder
+mappa l'input nei codici del codebook; il decoder ricostruisce l'input dai codici.
+La rappresentazione è compatta e comprimibile.
+\item[PixelCNN:] apprende una prior autoregressiva sulla distribuzione congiunta dei
+codici latenti prodotti dal VQ-VAE.
+\end{description}
+
+\begin{enumerate}
+  \item si addestra il VQ-VAE e si impara lo spazio discreto;
+  \item si codificano i dati e si ottengono le griglie di codici;
+  \item si addestra PixelCNN sulle griglie (prior);
+  \item si campiona una nuova griglia da PixelCNN;
+  \item si decodifica la griglia con il decoder del VQ-VAE.
+\end{enumerate}
+
+PixelCNN funziona anche su pixel grezzi e su altre strutture discrete (testo, token audio, mappe di segmentazione).
+Punti di forza: likelihood esplicita e scoring per campione. Limite: sampling lento.
+
+\begin{importante}[Da saper dire a voce]
+Il VQ-VAE non ha una prior sui codici. Si fattorizza $p(z)=\prod_t p(z_t\mid z_{<t})$ con la chain rule e ogni
+condizionata è una categorica predetta da PixelCNN, una CNN con convoluzioni mascherate (tipo A nel primo layer,
+tipo B nei successivi) che impedisce di vedere il futuro. Si addestra con la cross-entropy e il teacher forcing
+(un solo forward), mentre il sampling è sequenziale in ordine raster, quindi lento. La likelihood esplicita permette anomaly e novelty detection.
+\end{importante}
+
+%=====================================================================
+\section{Gumbel-Softmax}
+%=====================================================================
+
+\subsection{Il problema della scelta hard}
+Una selezione discreta si scrive
+\[
+i^\star=\arg\max_i s_i,\qquad v=\mathrm{values}[i^\star].
+\]
+\texttt{argmax} restituisce un indice intero, quindi la loss calcolata da $v$ non manda alcun gradiente
+ai punteggi $s_i$ né alla query (nell'esempio delle slide \texttt{query.grad} è \texttt{None}).
+
+\textbf{Richiamo: STE nel VQ-VAE.} L'encoder produce $z_e$, il nearest-neighbor seleziona $z_q=e_{k^\star}$;
+nel forward si usa il codice discreto, nel backward la quantizzazione è trattata come identità.
+È un'approssimazione del gradiente, non la derivata esatta.
+
+\subsection{Idea}
+Gumbel-Softmax campiona da una categorica nel forward, mantenendo un percorso differenziabile rispetto ai logits.
+Dato $\boldsymbol{\pi}=(\pi_1,\dots,\pi_K)$ (probabilità delle categorie, $\log\pi_k$ sono i logits), si aggiunge rumore Gumbel $g_k$ e si applica la softmax con temperatura $\lambda$:
+\[
+\boxed{y_k=\frac{\exp\big((\log\pi_k+g_k)/\lambda\big)}{\sum_{j}\exp\big((\log\pi_j+g_j)/\lambda\big)},\qquad g_k=-\log(-\log U),\ \ U\sim\mathcal{U}(0,1)}
+\]
+È simile al reparameterization trick del VAE: la casualità sta in $g_k$, che non dipende dai parametri, quindi il gradiente passa.
+
+\begin{center}
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{|p{3.3cm}|p{5.2cm}|p{5.2cm}|}
+\hline
+\textbf{Scelta hard} & \textbf{Softmax} & \textbf{Gumbel-Softmax} \\
+\hline
+$y=\operatorname{onehot}(\arg\max_j\pi_j)$ & $y_k=\dfrac{e^{\pi_k/\lambda}}{\sum_j e^{\pi_j/\lambda}}$ & $y_k$ della formula sopra \\
+\hline
+discreta, non differenziabile & continua, differenziabile, deterministica & stocastica e differenziabile \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Temperatura}
+\begin{itemize}
+  \item $\lambda$ alta: distribuzione più morbida e diffusa;
+  \item $\lambda$ bassa: distribuzione concentrata su una categoria;
+  \item $\lambda\to0$: $\mathbf{y}$ diventa approssimativamente one-hot.
+\end{itemize}
+Con logits $[2.0,\,0.5,\,1.0]$ la softmax a $\lambda=1$ è più morbida che a $\lambda=0.1$.
+Il rumore può cambiare la categoria favorita nel singolo campionamento.
+
+\subsection{PyTorch}
+Con \texttt{hard=True} si ottiene un campione one-hot nel forward e si usano i gradienti soft nel backward (straight-through).
+\begin{lstlisting}
+import torch
+import torch.nn.functional as F
+
+logits = torch.tensor([[2.0, 0.01, 1.0]], requires_grad=True)
+tau = 0.5
+
+y_soft1 = F.gumbel_softmax(logits, tau=tau, hard=False)
+y_soft2 = F.gumbel_softmax(logits, tau=tau, hard=False)
+y_hard  = F.gumbel_softmax(logits, tau=tau, hard=True)
+\end{lstlisting}
+Le due chiamate soft danno risultati diversi perché il rumore viene ricampionato.
+
+\textbf{Esempio di selezione con attention.}
+\begin{lstlisting}
+scores = torch.matmul(keys, query.T).squeeze()
+weights = F.gumbel_softmax(scores, tau=0.1, hard=True)
+
+selected_value = torch.sum(weights.unsqueeze(1) * values)
+loss = selected_value ** 2
+loss.backward()
+
+print("Selected value:", selected_value.item())
+print("Gradient w.r.t. query:", query.grad)
+\end{lstlisting}
+Il forward sceglie un solo elemento (valore $30.0$ nella slide), ma il gradiente surrogato arriva alla query e risulta non nullo.
+
+\subsection{Applicazione: conditional computation e Mixture of Experts}
+La \textbf{conditional computation} attiva solo una parte del modello per ogni input (inferenza sparsa ed efficiente).
+Nelle \textbf{Mixture of Experts (MoE)} un router seleziona gli esperti da attivare, ma $\arg\max_i\operatorname{scores}_i$ non è differenziabile.
+Con Gumbel-Softmax il routing diventa differenziabile (vettore soft, o hard-annealed simile a one-hot) e si addestra con gradient descent.
+
+\begin{importante}[Da saper dire a voce]
+\texttt{argmax} e il campionamento categorico bloccano il gradiente. Gumbel-Softmax somma rumore Gumbel ai logits e applica una softmax
+con temperatura $\lambda$: $\lambda\to0$ dà un one-hot, ma il percorso resta differenziabile. Con \texttt{hard=True} il forward è discreto e il backward usa il gradiente soft.
+Si usa, ad esempio, nel routing delle MoE.
+\end{importante}
+
+\subsection{Schema finale per il ripasso}
+\begin{center}
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{|p{3.1cm}|p{5.4cm}|p{5.2cm}|}
+\hline
+\textbf{Concetto} & \textbf{Formula / procedura} & \textbf{Idea} \\
+\hline
+Prior autoregressiva & $p(z)=\prod_t p(z_t\mid z_{<t})$ & ogni codice dipende solo dai precedenti \\
+\hline
+PixelCNN & CNN con convoluzioni mascherate (A, poi B) & la maschera impedisce di vedere il futuro \\
+\hline
+Sampling & raster scan, una posizione per volta & sequenziale e lento \\
+\hline
+Training & NLL / cross-entropy & teacher forcing: forward parallelo \\
+\hline
+Likelihood & $\log p(x)=\sum_{i,j}\log p(x_{i,j}\mid x_{<i,j})$ & scoring esplicito dei campioni \\
+\hline
+STE & forward hard, backward identità & gradiente surrogato nella quantizzazione \\
+\hline
+Gumbel-Softmax & softmax + rumore Gumbel + temperatura & campionamento categorico differenziabile \\
+\hline
+MoE routing & selezione degli esperti & Gumbel-Softmax rende addestrabile il routing \\
+\hline
+\end{tabular}
+\end{center}
+
 \end{document}
